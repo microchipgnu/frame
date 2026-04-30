@@ -1,4 +1,4 @@
-frame_protocol: "0.1.0"
+frame_protocol: "0.0.1"
 name: ai_agent_wallets_eu
 description: |
   Companies headquartered in Europe building programmable wallets for AI

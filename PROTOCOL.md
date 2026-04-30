@@ -1,9 +1,8 @@
-# frame protocol v0.2.0
+# frame protocol v0.0.1
 
-**Changes since v0.1.0:** none in the on-disk format itself. The protocol's *file* shape is
-unchanged. v0.2.0 marks additive growth in the curation MCP surface (bulk-write tools,
-`include_sources` on `query`, an `all_sources` SQL view) — see [MCP.md](./MCP.md). v0.1.0
-frames remain readable and writable by v0.2.0 implementations.
+First published version. The on-disk format and projection algorithm specified
+below constitute the contract. Future minor versions add optional event types
+and optional schema fields; older readers must skip unknowns.
 
 A frame is a directory containing a curated, evidence-backed, version-controlled dataset.
 

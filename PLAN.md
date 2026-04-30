@@ -57,16 +57,20 @@ Verified via:
   3 entities curated with full evidence, x402-paid Exa search drove the agent,
   every fact carries a verbatim excerpt.
 
-**v0.2.0 ships in response to feedback (see FEEDBACK.md):**
-- Cross-runtime: ships as Node + Bun (single npm package).
-- Bulk write: `set_facts`, `add_entity_with_facts` — ~5–10× session throughput.
-- `query include_sources` — evidence visible by default in queries that opt in.
+**Shipped in v0.0.1 (first published release on npm as `@frames-ag/frame`):**
+- Cross-runtime: ships as Node + Bun (single npm package, SQLite shim).
+- 9 curation tools, including bulk write (`set_facts`, `add_entity_with_facts`).
+- `query include_sources` — evidence visible by opt-in flag.
 - `all_sources` SQL view — primary + corroborating evidence in one place.
 - Schema hot-reload — edit `schema.yml`, MCP picks it up, no restart.
 
-**Discipline note (anti-revisit):** the engine knows about field *types* (`string`, `int`, `enum`), not field *values* ("which countries are European"). Domain content lives in each frame's `schema.yml`, never in the engine source. Tempting feedback like "bake the EU country list into the engine" gets answered at the dataset layer, not the runtime layer.
+**Discipline note (anti-revisit):** the engine knows about field *types* (`string`, `int`, `enum`), not field *values* ("which countries are European"). Domain content lives in each frame's `schema.yml`, never in the engine source.
 
-**Next concrete step:** publish to npm as `@frames-ag/frame`, then write a thin Claude Code skill that bakes the curation discipline (always cite a source, prefer verbatim excerpts, never invent values) into a reusable system prompt agents can adopt.
+**Queued for v0.0.2 / v0.1.0 when evidence justifies:**
+- `run_id` on the event envelope — correlates events within one curation tick. Enables joining the frame to a separate runtime tool log.
+- URI-shaped source.url validation (accepts `file://`, `doi:`, `arxiv:`, `manual:`, etc.) — drops the http-only restriction. Needed when frames source from local docs, scholarly papers, or internal databases.
+
+**Next concrete step:** write a thin Claude Code skill that bakes the curation discipline (always cite a source, prefer verbatim excerpts, never invent values) into a reusable system prompt agents can adopt.
 
 ---
 

@@ -1,7 +1,7 @@
 // Core types for the frame protocol v0.1.0.
 // See PROTOCOL.md for the canonical spec.
 
-export const PROTOCOL_VERSION = "0.2.0";
+export const PROTOCOL_VERSION = "0.0.1";
 
 // ─── Sources ─────────────────────────────────────────────────────────────────
 

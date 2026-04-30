@@ -1,11 +1,9 @@
-# frame curation MCP v0.2.0
+# frame curation MCP v0.0.1
 
-**Changes since v0.1.0:**
-- Added `set_facts` — bulk-set N facts on one entity sharing a single source. Atomic.
-- Added `add_entity_with_facts` — entity + N facts in one call. The most common pattern.
-- Added `include_sources` boolean on `query` (modes `all`/`entity`/`field`). Annotates each row's fields with their primary source.
-- Added an `all_sources` SQL view — every primary + corroborating source for every live fact, in one queryable place. Use via `query` mode `sql`.
-- v0.1.0 clients work unchanged against v0.2.0 servers.
+First published version. Nine tools (`add_entity`, `set_fact`, `set_facts`,
+`add_entity_with_facts`, `deprecate_fact`, `attach_evidence`, `remove_entity`,
+`query`, `project`) and six read-only resources. Mutations are atomic. Source
+required on every write.
 
 The MCP server is the engine. Every mutation to a frame goes through it. Agents (Claude Code, OpenCode, agent-os, native loops) call typed tools; the server enforces invariants and appends events to `events.ndjson`.
 

@@ -28,9 +28,9 @@ Ran 3 entities × 4–5 facts via x402-paid Exa search + Twitter, all evidence-b
 |---|---|---|---|
 | 1 | `better-sqlite3` missing from `package.json` | **fixed** | Added as dep; cross-runtime shim chooses `bun:sqlite` under Bun, `better-sqlite3` under Node. |
 | 2 | No schema hot-reload — full MCP restart required after every `schema.yml` edit | **fixed** | mtime-based reload (commit `1d0c633`). |
-| 3 | `query mode=all` hides evidence | **fixed in 0.2.0** | New `include_sources` flag attaches each field's primary source; new `all_sources` SQL view exposes primary + corroborating in one view. |
-| 4 | No bulk write — N round-trips per entity | **fixed in 0.2.0** | New `set_facts` (multi-fact, one source) and `add_entity_with_facts` (entity + facts in one call). Atomic. ~5–10× session throughput. |
-| 5 | Two-tier evidence storage surprising | **fixed in 0.2.0** | `all_sources` view UNIONs `facts` + `evidence` with an `is_primary` column. |
+| 3 | `query mode=all` hides evidence | **fixed** | New `include_sources` flag attaches each field's primary source; new `all_sources` SQL view exposes primary + corroborating in one view. |
+| 4 | No bulk write — N round-trips per entity | **fixed** | New `set_facts` (multi-fact, one source) and `add_entity_with_facts` (entity + facts in one call). Atomic. ~5–10× session throughput. |
+| 5 | Two-tier evidence storage surprising | **fixed** | `all_sources` view UNIONs `facts` + `evidence` with an `is_primary` column. |
 | 6 | Seed enum in the example frame was incomplete | **fixed at the dataset layer (correctly)** | The example frame's `schema.yml` widened to all EU+EEA codes. No engine change — country lists are dataset content, not engine content. The engine knows about *types* (`enum`), not values. |
 | 7 | README claims a refresh policy that the runtime doesn't yet implement | **fixed** | Example README explicitly marks the refresh policy as aspirational and points at PLAN.md Stage 1. |
 
