@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import { join } from "node:path";
 import { resolveFrameDir } from "../src/cli/util.js";
 import { initMcp } from "../src/cli/init-mcp.js";
+import { init } from "../src/cli/init.js";
 import { PROTOCOL_VERSION } from "../src/types.js";
 
 const TMP = "/tmp/frame-cli-test";
@@ -51,6 +52,47 @@ describe("cwd default", () => {
     const b = makeFrame("override-b");
     process.chdir(a);
     expect(resolveFrameDir(b)).toBe(b);
+  });
+});
+
+describe("init", () => {
+  test("init <name> creates a new directory with all scaffold files", () => {
+    rmSync(join(TMP, "init-new"), { recursive: true, force: true });
+    mkdirSync(TMP, { recursive: true });
+    process.chdir(realpathSync(TMP));
+    init(["init-new"]);
+    const dir = join(realpathSync(TMP), "init-new");
+    expect(existsSync(join(dir, "schema.yml"))).toBe(true);
+    expect(existsSync(join(dir, "events.ndjson"))).toBe(true);
+    expect(existsSync(join(dir, "README.md"))).toBe(true);
+    expect(existsSync(join(dir, ".gitattributes"))).toBe(true);
+  });
+
+  test("init . initializes the current empty directory", () => {
+    const dir = join(TMP, "init-dot");
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    process.chdir(realpathSync(dir));
+    init(["."]);
+    expect(existsSync(join(dir, "schema.yml"))).toBe(true);
+  });
+
+  test("init with no args initializes cwd", () => {
+    const dir = join(TMP, "init-noargs");
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    process.chdir(realpathSync(dir));
+    init([]);
+    expect(existsSync(join(dir, "schema.yml"))).toBe(true);
+  });
+
+  test("init refuses non-empty existing directory", () => {
+    const dir = join(TMP, "init-nonempty");
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "stray.txt"), "hello");
+    process.chdir(realpathSync(TMP));
+    expect(() => init(["init-nonempty"])).toThrow();
   });
 });
 

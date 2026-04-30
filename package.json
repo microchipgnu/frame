@@ -1,6 +1,6 @@
 {
   "name": "@frames-ag/frame",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
   "description": "The open format for live, evidence-backed datasets — protocol, CLI, and curation MCP server.",
   "license": "MIT",
