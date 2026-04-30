@@ -172,13 +172,17 @@ Error codes are stable strings. New codes can be added in minor versions; existi
 
 ## What the server does NOT do
 
-Deliberately excluded from the MCP surface (these belong in higher stages):
+The frame MCP is a **curation surface**, not a runtime. The following are deliberately out of scope and live one layer up, in the *runtime configuration* (the agent harness, the local CLI, or Frames Cloud):
 
-- **Scheduling, refresh, freshness.** No `tick`, no `schedule`. The server is a curation surface, not a runtime. The skateboard CLI's `tick` command spawns an agent harness pointed at this server; that's a different layer.
-- **Tool calls to external providers.** No `search`, `fetch`, `extract`. Those are agent-side concerns; the agent uses its own tools, then writes results to the frame via `set_fact`.
+- **Scheduling, refresh, freshness.** No `tick`, no `schedule`. The runtime decides when to invoke the agent and how often.
+- **Tool calls to external providers.** No `search`, `fetch`, `extract`. The agent harness uses its own tools (or its own MCP-bridged tools) and writes the result to the frame via `set_fact` with a source. The frame records what the runtime claims; verification is upstream.
+- **Wallets, payments, x402/MPP.** The frame never holds a wallet, never debits, never tracks balances. Payment is a runtime concern: the harness pays for its tool calls and inference via whatever rails it's configured with (OWS for the canonical Frames runtime). The frame's job is to record sourced facts, not to fund their acquisition.
+- **Inference credentials.** The frame doesn't know which model is reasoning over it. Model selection, API keys, and inference billing live with the harness.
 - **Multi-frame composition.** No cross-frame queries. Future versions may add `frame://refs/<other-frame>/...` resources, but `query` is single-frame.
 - **Authentication.** The server trusts whoever connects. AuthN/AuthZ is the responsibility of the transport layer (e.g., HTTP middleware) or the calling harness.
 - **Streaming, real-time subscriptions.** Reads are point-in-time. Subscriptions can be added later as a minor-version extension.
+
+This boundary is what makes the same frame portable across runtimes: a frame curated locally with your own wallet and tool keys is byte-identical to a frame curated by Frames Cloud with managed wallets and a federated catalog. Only the runtime configuration differs.
 
 ## Versioning
 

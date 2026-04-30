@@ -78,4 +78,12 @@ Federated catalog as marketplace. Cross-frame composition. Enterprise tier.
 2. Every mutation to a frame goes through the MCP server. No direct file edits — even from the CLI; the CLI talks to the same engine the MCP server exposes.
 3. Every fact names a source. The MCP server rejects writes that don't.
 4. Deprecate, don't delete. `fact.deprecated` events; rows projection ignores deprecated facts.
-5. The protocol layer never grows to absorb runtime concerns (heartbeat, scheduling, lifecycle states, wallet). Those live in separate stages.
+5. The protocol layer never grows to absorb runtime concerns (heartbeat, scheduling, lifecycle states, wallet, tool catalog access). Those live in separate stages.
+
+## Architectural decisions (anti-revisit list)
+
+These have been considered and decided. Don't re-open without new evidence.
+
+- **Wallets and tool catalog access are runtime configuration, not part of the frame protocol or the curation MCP.** Self-hosted users configure their own wallet/tools in the agent harness. Frames Cloud injects managed wallet/tools into the runtime on the user's behalf. The frame MCP server stays identical across modes. *Decided 2026-04-30. See MCP.md § "What the server does NOT do".*
+- **Catalog-mediated tools are not in scope for skateboard.** Agents use their harness's native tools (Claude Code's WebSearch/WebFetch, OpenCode's bash+curl, etc.) and write results to the frame via `set_fact`. The frame records what the runtime claims; source verification (was this URL actually fetched?) is a runtime concern, not the protocol's. *Decided 2026-04-30.*
+- **The CLI is a thin client of the same engine the MCP server uses.** No bypass, no direct file edits. Both surfaces enforce identical invariants. *Decided 2026-04-30.*
