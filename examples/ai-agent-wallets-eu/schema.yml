@@ -1,0 +1,41 @@
+frame_protocol: "0.1.0"
+name: ai_agent_wallets_eu
+description: |
+  Companies headquartered in Europe building programmable wallets for AI
+  agents — including x402/MCP payment infrastructure, key management for
+  autonomous agents, and custody for agentic workloads.
+entity_type: company
+
+fields:
+  name:
+    type: string
+    required: true
+    description: legal or commonly-used company name
+  homepage:
+    type: url
+    required: true
+    description: primary product homepage
+  hq_country:
+    type: enum
+    required: true
+    values: [DE, FR, UK, ES, IT, NL, SE, PL, PT, IE, AT, BE, DK, FI, NO, CH, GR, RO]
+  founded_year:
+    type: int
+    description: year the company was founded
+  category:
+    type: enum
+    values: [wallet, payment_infra, key_management, custody]
+  funding_stage:
+    type: string
+    description: "preseed | seed | series_a | series_b | …"
+  last_news_url:
+    type: url
+    description: most recent reputable news source mentioning the company
+  last_news_date:
+    type: date
+
+tests:
+  - name: hq_must_be_eu
+    field: hq_country
+    rule: enum
+    allowed: [DE, FR, UK, ES, IT, NL, SE, PL, PT, IE, AT, BE, DK, FI, NO, CH, GR, RO]

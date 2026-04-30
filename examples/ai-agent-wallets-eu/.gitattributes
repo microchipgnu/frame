@@ -1,0 +1,2 @@
+events.ndjson merge=union
+.frame/** -diff -merge linguist-generated=true
