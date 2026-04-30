@@ -18,7 +18,15 @@ key-management products, and custody solutions targeted at agentic workloads.
 - US-headquartered companies (track separately).
 - Pure consultancies or research groups without a product.
 
-## Refresh policy
+## Refresh policy (aspirational — runtime layer not yet shipped)
 
-Daily re-verification of homepage + last news source per entity. Discovery
-pass weekly. Retire after 3 consecutive failed verifications.
+The intended cadence, when the heartbeat/scheduler runtime is wired:
+
+- Daily re-verification of homepage + last news source per entity.
+- Weekly discovery pass.
+- Retire after 3 consecutive failed verifications.
+
+Today this frame is curated manually via the MCP server. The heartbeat that
+would automate the above lives in a separate runtime layer (see PLAN.md
+Stage 1). Until that ships, treat this section as the *spec* the runtime
+will implement, not behavior you'll observe.

@@ -62,6 +62,83 @@ const TOOLS = [
     },
   },
   {
+    name: "set_facts",
+    description:
+      "Bulk-set multiple facts on one entity sharing a single source. Use when you've read a page and want to extract N fields from it — one call instead of N. Atomic: either every fact lands or none do.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_id: { type: "string" },
+        source: {
+          type: "object",
+          properties: {
+            url: { type: "string" },
+            retrieved_at: { type: "string" },
+            title: { type: "string" },
+            archive_url: { type: "string" },
+            excerpt: { type: "string" },
+          },
+          required: ["url", "retrieved_at"],
+        },
+        facts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              field: { type: "string" },
+              value: {},
+              confidence: { type: "number", minimum: 0, maximum: 1 },
+              observed_at: { type: "string" },
+            },
+            required: ["field", "value"],
+          },
+        },
+      },
+      required: ["entity_id", "source", "facts"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "add_entity_with_facts",
+    description:
+      "Combine entity creation and bulk fact-set in one call. Highest-throughput for the common pattern: one page read → one entity with N fields. Returns entity_id and all fact_ids.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity_id: {
+          type: "string",
+          description: "Optional. Slug-shaped (a-z0-9_-). Auto-generated if omitted.",
+        },
+        source: {
+          type: "object",
+          properties: {
+            url: { type: "string" },
+            retrieved_at: { type: "string" },
+            title: { type: "string" },
+            archive_url: { type: "string" },
+            excerpt: { type: "string" },
+          },
+          required: ["url", "retrieved_at"],
+        },
+        facts: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              field: { type: "string" },
+              value: {},
+              confidence: { type: "number", minimum: 0, maximum: 1 },
+              observed_at: { type: "string" },
+            },
+            required: ["field", "value"],
+          },
+        },
+      },
+      required: ["source", "facts"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "deprecate_fact",
     description:
       "Mark a previously-set fact as no longer trusted. Reverts the (entity, field) to the most recent prior non-deprecated fact, or unsets.",
@@ -116,7 +193,7 @@ const TOOLS = [
   {
     name: "query",
     description:
-      "Read the current state of the frame. mode=all returns every row; mode=entity returns one; mode=field filters by a field; mode=sql runs a read-only SQL query against the SQLite index.",
+      "Read the current state of the frame. mode=all returns every row; mode=entity returns one; mode=field filters by a field; mode=sql runs a read-only SQL query against the SQLite index. Set include_sources=true on non-sql modes to attach each field's primary source. For full evidence including corroborating sources, query the `all_sources` view via mode=sql.",
     inputSchema: {
       type: "object",
       properties: {
@@ -125,6 +202,10 @@ const TOOLS = [
         field: { type: "string" },
         value: {},
         sql: { type: "string" },
+        include_sources: {
+          type: "boolean",
+          description: "Include primary source per field on each row. Ignored in mode=sql.",
+        },
       },
       required: ["mode"],
       additionalProperties: false,
@@ -254,6 +335,10 @@ function dispatch(
       return frame.addEntity(args as { entity_id?: string });
     case "set_fact":
       return frame.setFact(args as Parameters<Frame["setFact"]>[0]);
+    case "set_facts":
+      return frame.setFacts(args as Parameters<Frame["setFacts"]>[0]);
+    case "add_entity_with_facts":
+      return frame.addEntityWithFacts(args as Parameters<Frame["addEntityWithFacts"]>[0]);
     case "deprecate_fact":
       return frame.deprecateFact(args as Parameters<Frame["deprecateFact"]>[0]);
     case "attach_evidence":

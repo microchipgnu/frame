@@ -214,6 +214,87 @@ describe("projector", () => {
     );
   });
 
+  test("add_entity_with_facts produces one row in one call", () => {
+    const dir = fresh("bulk");
+    const frame = new Frame(dir);
+    const r = frame.addEntityWithFacts({
+      entity_id: "acme",
+      source: SOURCE,
+      facts: [
+        { field: "name", value: "Acme" },
+        { field: "founded_year", value: 2024 },
+      ],
+    });
+    expect(r.entity_id).toBe("acme");
+    expect(r.fact_ids.length).toBe(2);
+    const row = frame.query({ mode: "entity", entity_id: "acme" }).rows[0];
+    expect(row?.fields.name).toBe("Acme");
+    expect(row?.fields.founded_year).toBe(2024);
+  });
+
+  test("set_facts is atomic — invalid fact rejects the whole call", () => {
+    const dir = fresh("atomic");
+    const frame = new Frame(dir);
+    frame.addEntity({ entity_id: "acme" });
+    expect(() =>
+      frame.setFacts({
+        entity_id: "acme",
+        source: SOURCE,
+        facts: [
+          { field: "name", value: "Acme" },
+          { field: "founded_year", value: "not-a-number" }, // bad — int expected
+        ],
+      }),
+    ).toThrow(/expects int/);
+    // First fact must NOT have landed.
+    const row = frame.query({ mode: "all" }).rows[0];
+    expect(row?.fields.name).toBeUndefined();
+  });
+
+  test("query include_sources annotates each field with its primary source", () => {
+    const dir = fresh("withsrc");
+    const frame = new Frame(dir);
+    frame.addEntityWithFacts({
+      entity_id: "acme",
+      source: { ...SOURCE, excerpt: "Acme founded 2024" },
+      facts: [
+        { field: "name", value: "Acme" },
+        { field: "founded_year", value: 2024 },
+      ],
+    });
+    const r = frame.query({ mode: "all", include_sources: true });
+    const row = r.rows[0]!;
+    expect(row.sources).toBeDefined();
+    expect(row.sources?.name?.url).toBe(SOURCE.url);
+    expect(row.sources?.name?.excerpt).toBe("Acme founded 2024");
+    expect(row.sources?.founded_year?.url).toBe(SOURCE.url);
+  });
+
+  test("all_sources view returns primary + corroborating evidence in one query", () => {
+    const dir = fresh("allsrc");
+    const frame = new Frame(dir);
+    frame.addEntity({ entity_id: "acme" });
+    const f = frame.setFact({
+      entity_id: "acme",
+      field: "name",
+      value: "Acme",
+      source: { url: "https://primary.example", retrieved_at: SOURCE.retrieved_at },
+    });
+    frame.attachEvidence({
+      fact_id: f.fact_id,
+      source: { url: "https://corroborating.example", retrieved_at: SOURCE.retrieved_at },
+    });
+    const r = frame.query({
+      mode: "sql",
+      sql: "SELECT source_url, is_primary FROM all_sources WHERE entity_id = 'acme' AND field = 'name' ORDER BY is_primary DESC",
+    });
+    expect(r.rows.length).toBe(2);
+    expect((r.rows[0] as any).source_url).toBe("https://primary.example");
+    expect((r.rows[0] as any).is_primary).toBe(1);
+    expect((r.rows[1] as any).source_url).toBe("https://corroborating.example");
+    expect((r.rows[1] as any).is_primary).toBe(0);
+  });
+
   test("invalid rows are flagged, not dropped", () => {
     const dir = fresh("invalid");
     const frame = new Frame(dir);

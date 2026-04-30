@@ -113,6 +113,107 @@ export class Frame {
     }
   }
 
+  // 2a. set_facts — bulk variant: multiple facts on one entity sharing a source.
+  // The common pattern (one page → N fields) gets one MCP round-trip instead of N.
+  // Atomic: either every fact lands, or none do.
+  setFacts(input: {
+    entity_id: string;
+    source: Source;
+    facts: Array<{
+      field: string;
+      value: unknown;
+      confidence?: number;
+      observed_at?: string;
+    }>;
+  }): { fact_ids: string[] } {
+    const release = this.acquireLock();
+    try {
+      const schema = this.schema();
+      const source = validateSource(input.source);
+
+      // Validate everything BEFORE appending — atomicity.
+      for (const f of input.facts) {
+        const def = schema.fields[f.field];
+        if (!def && !schema.allow_unknown_fields) {
+          throw new FrameError(
+            "UnknownField",
+            `field ${f.field} is not in schema.yml`,
+          );
+        }
+        if (def) validateValue(f.field, def, f.value);
+        if (f.confidence !== undefined) {
+          if (
+            typeof f.confidence !== "number" ||
+            f.confidence < 0 ||
+            f.confidence > 1
+          ) {
+            throw new FrameError("InvalidConfidence", `confidence must be in [0, 1]`);
+          }
+        }
+      }
+
+      const events = this.events();
+      const entityExists = events.some(
+        (e) =>
+          e.type === "entity.created" &&
+          (e.payload as any).entity_id === input.entity_id,
+      );
+      if (!entityExists) {
+        throw new FrameError(
+          "EntityNotFound",
+          `entity ${input.entity_id} doesn't exist; call add_entity first`,
+        );
+      }
+
+      const fact_ids: string[] = [];
+      for (const f of input.facts) {
+        const fact_id = uuid();
+        fact_ids.push(fact_id);
+        appendEvent(this.eventsPath, {
+          id: uuid(),
+          ts: now(),
+          type: "fact.set",
+          agent: this.agent,
+          payload: {
+            fact_id,
+            entity_id: input.entity_id,
+            field: f.field,
+            value: f.value,
+            source,
+            ...(f.confidence !== undefined ? { confidence: f.confidence } : {}),
+            ...(f.observed_at ? { observed_at: f.observed_at } : {}),
+          },
+        } as FrameEvent);
+      }
+      this.project();
+      return { fact_ids };
+    } finally {
+      release();
+    }
+  }
+
+  // 2b. add_entity_with_facts — combines entity creation with N facts in one call.
+  // Highest-throughput primitive for the common pattern: "I just read a page; here is
+  // an entity with these N fields." One round-trip instead of N+1.
+  addEntityWithFacts(input: {
+    entity_id?: string;
+    source: Source;
+    facts: Array<{
+      field: string;
+      value: unknown;
+      confidence?: number;
+      observed_at?: string;
+    }>;
+  }): { entity_id: string; fact_ids: string[] } {
+    const { entity_id } = this.addEntity({ entity_id: input.entity_id });
+    const { fact_ids } = this.setFacts({
+      entity_id,
+      source: input.source,
+      facts: input.facts,
+    });
+    return { entity_id, fact_ids };
+  }
+
   // 2. set_fact
   setFact(input: {
     entity_id: string;
@@ -285,15 +386,48 @@ export class Frame {
   // 5. query
   query(
     input:
-      | { mode: "entity"; entity_id: string }
-      | { mode: "all" }
-      | { mode: "field"; field: string; value?: unknown }
+      | { mode: "entity"; entity_id: string; include_sources?: boolean }
+      | { mode: "all"; include_sources?: boolean }
+      | { mode: "field"; field: string; value?: unknown; include_sources?: boolean }
       | { mode: "sql"; sql: string },
   ): { rows: Row[]; total: number } {
     if (!existsSync(this.dbPath)) this.project();
 
     const db = new Database(this.dbPath, { readonly: true });
     type DbRow = { entity_id: string; fields_json: string; invalid_json: string | null };
+
+    // Fetch primary sources for the given entity_ids and zip them onto each row.
+    // Only used when include_sources is true.
+    const annotateSources = (rows: Row[]): Row[] => {
+      if (rows.length === 0) return rows;
+      const placeholders = rows.map(() => "?").join(",");
+      const stmt = db.prepare(
+        `SELECT entity_id, field, source_url, source_retrieved_at, source_title, source_archive_url, source_excerpt
+           FROM facts
+          WHERE deprecated = 0 AND entity_id IN (${placeholders})`,
+      );
+      const sources = stmt.all<{
+        entity_id: string;
+        field: string;
+        source_url: string;
+        source_retrieved_at: string;
+        source_title: string | null;
+        source_archive_url: string | null;
+        source_excerpt: string | null;
+      }>(...rows.map((r) => r.entity_id));
+      const byEntity: Record<string, Record<string, Source>> = {};
+      for (const s of sources) {
+        const ent = byEntity[s.entity_id] ?? {};
+        const src: Source = { url: s.source_url, retrieved_at: s.source_retrieved_at };
+        if (s.source_title) src.title = s.source_title;
+        if (s.source_archive_url) src.archive_url = s.source_archive_url;
+        if (s.source_excerpt) src.excerpt = s.source_excerpt;
+        ent[s.field] = src;
+        byEntity[s.entity_id] = ent;
+      }
+      return rows.map((r) => ({ ...r, sources: byEntity[r.entity_id] ?? {} }));
+    };
+
     try {
       switch (input.mode) {
         case "entity": {
@@ -304,14 +438,18 @@ export class Frame {
           if (!r) {
             throw new FrameError("EntityNotFound", `entity ${input.entity_id} not in current rows`);
           }
-          return { rows: [rowFromDb(r)], total: 1 };
+          const rows = [rowFromDb(r)];
+          return { rows: input.include_sources ? annotateSources(rows) : rows, total: 1 };
         }
         case "all": {
           const stmt = db.prepare(
             "SELECT entity_id, fields_json, invalid_json FROM rows ORDER BY entity_id",
           );
-          const rs = stmt.all<DbRow>();
-          return { rows: rs.map(rowFromDb), total: rs.length };
+          const rs = stmt.all<DbRow>().map(rowFromDb);
+          return {
+            rows: input.include_sources ? annotateSources(rs) : rs,
+            total: rs.length,
+          };
         }
         case "field": {
           const stmt = db.prepare(
@@ -322,7 +460,10 @@ export class Frame {
             if (input.value === undefined) return r.fields[input.field] !== undefined;
             return r.fields[input.field] === input.value;
           });
-          return { rows: filtered, total: filtered.length };
+          return {
+            rows: input.include_sources ? annotateSources(filtered) : filtered,
+            total: filtered.length,
+          };
         }
         case "sql": {
           if (/\b(insert|update|delete|drop|alter|create|attach)\b/i.test(input.sql)) {

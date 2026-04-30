@@ -176,6 +176,7 @@ export function writeProjection(
   const dbPath = join(dotFrame, "dataset.db");
   const db = new Database(dbPath);
   try {
+    db.exec("DROP VIEW  IF EXISTS all_sources;");
     db.exec("DROP TABLE IF EXISTS rows;");
     db.exec("DROP TABLE IF EXISTS facts;");
     db.exec("DROP TABLE IF EXISTS evidence;");
@@ -292,6 +293,25 @@ export function writeProjection(
         r.invalid ? JSON.stringify(r.invalid) : null,
       );
     }
+
+    // ── Convenience view: every source (primary + corroborating) for every
+    //    live fact in one queryable place. Use when you want the complete
+    //    evidence picture without UNION-ing two tables yourself.
+    db.exec(`
+      CREATE VIEW all_sources AS
+        SELECT fact_id, entity_id, field,
+               source_url, source_retrieved_at, source_title,
+               source_archive_url, source_excerpt,
+               1 AS is_primary
+          FROM facts WHERE deprecated = 0
+        UNION ALL
+        SELECT e.fact_id, f.entity_id, f.field,
+               e.source_url, e.source_retrieved_at, e.source_title,
+               e.source_archive_url, e.source_excerpt,
+               0 AS is_primary
+          FROM evidence e JOIN facts f ON f.fact_id = e.fact_id
+          WHERE f.deprecated = 0;
+    `);
   } finally {
     db.close();
   }

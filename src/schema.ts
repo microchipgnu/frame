@@ -162,6 +162,18 @@ export function validateValue(
   }
 }
 
+// EU + UK + EEA country codes. Baked in so the common case ("entities by
+// European country") doesn't require curators to hand-list every code.
+// Used by starterSchema and available as a constant for downstream schemas.
+export const EU_EEA_COUNTRY_CODES: ReadonlyArray<string> = [
+  // EU
+  "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI",
+  "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU", "LV", "MT",
+  "NL", "PL", "PT", "RO", "SE", "SI", "SK",
+  // EFTA / EEA / UK
+  "CH", "GB", "IS", "LI", "NO", "UK",
+];
+
 // Generate a starter schema.yml string.
 export function starterSchema(name: string): string {
   return yamlStringify({

@@ -1,7 +1,7 @@
 // Core types for the frame protocol v0.1.0.
 // See PROTOCOL.md for the canonical spec.
 
-export const PROTOCOL_VERSION = "0.1.0";
+export const PROTOCOL_VERSION = "0.2.0";
 
 // ─── Sources ─────────────────────────────────────────────────────────────────
 
@@ -107,6 +107,9 @@ export type Row = {
   entity_id: string;
   fields: Record<string, unknown>;
   invalid?: { reason: string }[];
+  // Present only when query is called with include_sources: true.
+  // Maps each field name to its primary (live) source.
+  sources?: Record<string, Source>;
 };
 
 export type ProjectionStats = {

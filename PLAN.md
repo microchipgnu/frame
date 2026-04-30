@@ -46,15 +46,25 @@ Goal: a single-machine, single-frame system where an agent (Claude Code or OpenC
 
 ### Status as of 2026-04-30
 
-**Engine works end-to-end.** Verified via:
-- `bun test` — 12/12 projector tests pass.
-- Manual smoke: `init` → `addEntity` → `setFact` → `deprecateFact` → `query` round-trip produces correct rows.
-- Deprecation correctly reverts to prior fact (or unsets if none).
-- Invalid rows surface in projection with `invalid: [...]` rather than being dropped.
-- MCP handshake succeeds: `initialize` + `tools/list` returns all 7 tools with proper JSON Schema.
-- `doctor` passes on a freshly-initialized + curated frame.
+**Engine works end-to-end. First external curation session completed (see FEEDBACK.md).**
 
-**Next concrete step:** wire one agent harness. Either (a) Claude Code skill that calls `frame serve <dir>` as an MCP server and instructs the model how to curate, or (b) OpenCode `opencode.json` MCP server entry. Then run a real session against `examples/ai-agent-wallets-eu/`.
+Verified via:
+- `bun test` — 16/16 projector tests pass (12 original + 4 for v0.2.0 additions).
+- Manual smoke on both runtimes: Bun and Node. Same code, same behavior.
+- MCP handshake + `tools/list` returns 9 tools with proper JSON Schema.
+- `doctor` passes on a freshly-initialized + curated frame.
+- Real curation session via Claude Code MCP against `examples/ai-agent-wallets-eu/`:
+  3 entities curated with full evidence, x402-paid Exa search drove the agent,
+  every fact carries a verbatim excerpt.
+
+**v0.2.0 ships in response to feedback (see FEEDBACK.md):**
+- Cross-runtime: ships as Node + Bun (single npm package).
+- Bulk write: `set_facts`, `add_entity_with_facts` — ~5–10× session throughput.
+- `query include_sources` — evidence visible by default in queries that opt in.
+- `all_sources` SQL view — primary + corroborating evidence in one place.
+- Schema hot-reload — edit `schema.yml`, MCP picks it up, no restart.
+
+**Next concrete step:** publish to npm as `@frames-ag/frame`, then write a thin Claude Code skill that bakes the curation discipline (always cite a source, prefer verbatim excerpts, never invent values) into a reusable system prompt agents can adopt.
 
 ---
 
