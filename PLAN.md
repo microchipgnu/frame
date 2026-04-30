@@ -64,6 +64,8 @@ Verified via:
 - `all_sources` SQL view — primary + corroborating evidence in one place.
 - Schema hot-reload — edit `schema.yml`, MCP picks it up, no restart.
 
+**Discipline note (anti-revisit):** the engine knows about field *types* (`string`, `int`, `enum`), not field *values* ("which countries are European"). Domain content lives in each frame's `schema.yml`, never in the engine source. Tempting feedback like "bake the EU country list into the engine" gets answered at the dataset layer, not the runtime layer.
+
 **Next concrete step:** publish to npm as `@frames-ag/frame`, then write a thin Claude Code skill that bakes the curation discipline (always cite a source, prefer verbatim excerpts, never invent values) into a reusable system prompt agents can adopt.
 
 ---
