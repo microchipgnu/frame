@@ -127,4 +127,67 @@ describe("init-mcp", () => {
     // unchanged
     expect(readFileSync(join(dir, ".mcp.json"), "utf8")).toBe('{"existing": true}');
   });
+
+  test("multi-frame: cwd not a frame but children are — emits multi-server config", () => {
+    const root = join(TMP, "multi-root");
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root, { recursive: true });
+    // Make two nested frames
+    makeNestedFrame(root, "datasets/alpha");
+    makeNestedFrame(root, "datasets/beta");
+    process.chdir(realpathSync(root));
+    initMcp([]);
+    const cfg = JSON.parse(readFileSync(join(root, ".mcp.json"), "utf8"));
+    const names = Object.keys(cfg.mcpServers).sort();
+    expect(names).toEqual(["frame-datasets-alpha", "frame-datasets-beta"]);
+    expect(cfg.mcpServers["frame-datasets-alpha"].args).toEqual([
+      "-y",
+      "@frames-ag/frame",
+      "serve",
+      "datasets/alpha",
+    ]);
+  });
+
+  test("multi-frame: root frame + nested frames — registers all", () => {
+    const root = join(TMP, "multi-with-root");
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root, { recursive: true });
+    writeFileSync(
+      join(root, "schema.yml"),
+      `frame_protocol: "${PROTOCOL_VERSION}"\nname: root\nfields:\n  name:\n    type: string\n`,
+    );
+    writeFileSync(join(root, "events.ndjson"), "");
+    makeNestedFrame(root, "datasets/alpha");
+    process.chdir(realpathSync(root));
+    initMcp([]);
+    const cfg = JSON.parse(readFileSync(join(root, ".mcp.json"), "utf8"));
+    expect(Object.keys(cfg.mcpServers).length).toBe(2);
+    // The root frame entry has no positional path arg (cwd-default).
+    expect(cfg.mcpServers["frame-root"].args).toEqual(["-y", "@frames-ag/frame", "serve"]);
+    expect(cfg.mcpServers["frame-datasets-alpha"].args).toEqual([
+      "-y",
+      "@frames-ag/frame",
+      "serve",
+      "datasets/alpha",
+    ]);
+  });
+
+  test("multi-frame: errors when no frames anywhere", () => {
+    const root = join(TMP, "no-frames");
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root, { recursive: true });
+    process.chdir(realpathSync(root));
+    expect(() => initMcp([])).toThrow(/No schema.yml/);
+  });
 });
+
+function makeNestedFrame(root: string, relPath: string): void {
+  const dir = join(root, relPath);
+  mkdirSync(dir, { recursive: true });
+  const name = relPath.replace(/[^a-z0-9_-]/gi, "-");
+  writeFileSync(
+    join(dir, "schema.yml"),
+    `frame_protocol: "${PROTOCOL_VERSION}"\nname: ${name}\nfields:\n  name:\n    type: string\n`,
+  );
+  writeFileSync(join(dir, "events.ndjson"), "");
+}
