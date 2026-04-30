@@ -1,16 +1,16 @@
-// `frame query <name> [--all|--entity <id>|--field <f>=<v>|--sql <sql>] [--with-sources]`
+// `frame query [<path>] [--all|--entity <id>|--field <f>=<v>|--sql <sql>] [--with-sources]`
 
 import { Frame } from "../frame.js";
-import { resolveFrameDir } from "./util.js";
+import { resolveFrameDir, splitPathAndFlags } from "./util.js";
 
 export function query(args: string[]): void {
-  const dir = resolveFrameDir(args[0]);
+  const { path, flags } = splitPathAndFlags(args);
+  const dir = resolveFrameDir(path);
   const frame = new Frame(dir);
 
-  const rest = args.slice(1);
-  const include_sources = rest.includes("--with-sources");
+  const include_sources = flags.includes("--with-sources");
   // Strip the flag so positional parsing below isn't affected.
-  const positional = rest.filter((a) => a !== "--with-sources");
+  const positional = flags.filter((a) => a !== "--with-sources");
 
   let result;
 

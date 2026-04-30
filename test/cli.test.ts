@@ -4,9 +4,10 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveFrameDir } from "../src/cli/util.js";
+import { resolveFrameDir, splitPathAndFlags } from "../src/cli/util.js";
 import { initMcp } from "../src/cli/init-mcp.js";
 import { init } from "../src/cli/init.js";
+import { render } from "../src/cli/render.js";
 import { PROTOCOL_VERSION } from "../src/types.js";
 
 const TMP = "/tmp/frame-cli-test";
@@ -208,6 +209,74 @@ describe("init-mcp", () => {
     mkdirSync(root, { recursive: true });
     process.chdir(realpathSync(root));
     expect(() => initMcp([])).toThrow(/No schema.yml/);
+  });
+});
+
+describe("splitPathAndFlags", () => {
+  test("first arg is path when not a flag", () => {
+    expect(splitPathAndFlags(["my-frame", "--all"])).toEqual({
+      path: "my-frame",
+      flags: ["--all"],
+    });
+  });
+
+  test("first arg is undefined when a flag", () => {
+    expect(splitPathAndFlags(["--all"])).toEqual({
+      path: undefined,
+      flags: ["--all"],
+    });
+  });
+
+  test("empty args", () => {
+    expect(splitPathAndFlags([])).toEqual({ path: undefined, flags: [] });
+  });
+});
+
+describe("render", () => {
+  test("single frame writes index.html with entity table", () => {
+    const dir = makeFrame("render-single");
+    process.chdir(dir);
+    // Add an entity so the table isn't empty
+    const { Frame } = require("../src/frame.js");
+    const f = new Frame(dir, { agent: "human:test" });
+    f.addEntity({ entity_id: "acme" });
+    f.setFact({
+      entity_id: "acme",
+      field: "name",
+      value: "Acme",
+      source: { url: "https://example.com", retrieved_at: "2026-04-30T00:00:00Z", excerpt: "Acme stuff" },
+    });
+    render([]);
+    const html = readFileSync(join(dir, "index.html"), "utf8");
+    expect(html).toContain("<table>");
+    expect(html).toContain("acme");
+    expect(html).toContain("Acme");
+    expect(html).toContain("https://example.com");
+    expect(html).toContain("Acme stuff");
+  });
+
+  test("multi-frame writes a root index.html linking to each frame", () => {
+    const root = join(TMP, "render-multi");
+    rmSync(root, { recursive: true, force: true });
+    mkdirSync(root, { recursive: true });
+    makeNestedFrame(root, "datasets/alpha");
+    makeNestedFrame(root, "datasets/beta");
+    process.chdir(realpathSync(root));
+    render([]);
+    expect(existsSync(join(root, "index.html"))).toBe(true);
+    expect(existsSync(join(root, "datasets/alpha/index.html"))).toBe(true);
+    expect(existsSync(join(root, "datasets/beta/index.html"))).toBe(true);
+    const rootHtml = readFileSync(join(root, "index.html"), "utf8");
+    expect(rootHtml).toContain("datasets/alpha/index.html");
+    expect(rootHtml).toContain("datasets/beta/index.html");
+  });
+
+  test("errors when no frames anywhere", () => {
+    const empty = join(TMP, "render-empty");
+    rmSync(empty, { recursive: true, force: true });
+    mkdirSync(empty, { recursive: true });
+    process.chdir(realpathSync(empty));
+    expect(() => render([])).toThrow(/No schema.yml/);
   });
 });
 

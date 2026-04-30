@@ -4,10 +4,11 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Frame } from "../frame.js";
 import { readEvents } from "../events.js";
-import { resolveFrameDir } from "./util.js";
+import { resolveFrameDir, splitPathAndFlags } from "./util.js";
 
 export function doctor(args: string[]): void {
-  const dir = resolveFrameDir(args[0]);
+  const { path } = splitPathAndFlags(args);
+  const dir = resolveFrameDir(path);
   const checks: { name: string; ok: boolean; detail: string }[] = [];
 
   // schema.yml exists & parses

@@ -18,3 +18,15 @@ export function resolveFrameDir(arg: string | undefined): string {
   }
   return dir;
 }
+
+// Split CLI args into a (positional) path and remaining flags. The path must
+// be the first non-flag arg if any. Lets `frame query --all` Just Work without
+// `--all` getting consumed as the frame directory.
+export function splitPathAndFlags(args: string[]): {
+  path: string | undefined;
+  flags: string[];
+} {
+  const first = args[0];
+  if (!first || first.startsWith("--")) return { path: undefined, flags: args };
+  return { path: first, flags: args.slice(1) };
+}

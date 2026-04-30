@@ -5,6 +5,7 @@ import { init } from "./init.js";
 import { initMcp } from "./init-mcp.js";
 import { project } from "./project.js";
 import { query } from "./query.js";
+import { render } from "./render.js";
 import { serve } from "./serve.js";
 import { doctor } from "./doctor.js";
 import { PROTOCOL_VERSION } from "../types.js";
@@ -16,6 +17,7 @@ const COMMANDS: Record<string, (args: string[]) => void | Promise<void>> = {
   "init-mcp": initMcp,
   project,
   query,
+  render,
   serve,
   doctor,
 };
@@ -52,14 +54,16 @@ function usage() {
 
 usage:
   frame init <name>                       scaffold a new frame
-  frame init-mcp [--name X] [--force]     write .mcp.json next to a frame
-  frame serve [<name>]                    start the curation MCP server (stdio)
-  frame project [<name>]                  regenerate .frame/dataset.db
-  frame query [<name>] --all              dump every row
-  frame query [<name>] --entity <id>      one row by id
-  frame query [<name>] --field <f>=<v>    rows where field equals value
-  frame query [<name>] --sql "<select…>"  read-only SQL against the index
-  frame doctor [<name>]                   health check
+  frame init-mcp [--name X] [--force]     write .mcp.json next to a frame(s)
+  frame render [<path>]                   write static index.html (single or multi-frame)
+  frame serve [<path>]                    start the curation MCP server (stdio)
+  frame project [<path>]                  regenerate .frame/dataset.db
+  frame query [<path>] --all              dump every row
+  frame query [<path>] --entity <id>      one row by id
+  frame query [<path>] --field <f>=<v>    rows where field equals value
+  frame query [<path>] --sql "<select…>"  read-only SQL against the index
+  frame query ... --with-sources          attach primary source per field
+  frame doctor [<path>]                   health check
 
 When the path argument is omitted, the current working directory is used.
 This makes a project-scoped .mcp.json zero-config — drop it next to schema.yml.

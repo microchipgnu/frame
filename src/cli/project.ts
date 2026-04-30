@@ -1,10 +1,11 @@
-// `frame project <name>` — regenerate .frame/dataset.db and .frame/rows.ndjson.
+// `frame project [<path>]` — regenerate .frame/dataset.db and .frame/rows.ndjson.
 
 import { Frame } from "../frame.js";
-import { resolveFrameDir } from "./util.js";
+import { resolveFrameDir, splitPathAndFlags } from "./util.js";
 
 export function project(args: string[]): void {
-  const dir = resolveFrameDir(args[0]);
+  const { path } = splitPathAndFlags(args);
+  const dir = resolveFrameDir(path);
   const frame = new Frame(dir, { agent: "system:cli" });
   const stats = frame.project();
   console.log(`◇ projected ${dir}`);
