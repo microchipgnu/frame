@@ -2,7 +2,7 @@
 // The MCP server (src/mcp/server.ts) wraps this 1:1; the CLI uses it directly.
 // All mutations go through these methods.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import {
@@ -30,7 +30,10 @@ export class Frame {
   readonly lockPath: string;
   readonly dbPath: string;
 
+  // mtime-based schema cache. Re-read when schema.yml changes on disk so the
+  // running MCP server picks up edits without a restart.
   private _schema: FrameSchema | null = null;
+  private _schemaMtime = 0;
   private agent: AgentId;
 
   constructor(dir: string, opts: FrameOptions = {}) {
@@ -45,13 +48,11 @@ export class Frame {
   // ── lifecycle ──────────────────────────────────────────────────────────────
 
   schema(): FrameSchema {
-    if (!this._schema) this._schema = loadSchema(this.schemaPath);
-    return this._schema;
-  }
-
-  // Reload the schema from disk (call after the user edits schema.yml).
-  reloadSchema(): FrameSchema {
-    this._schema = loadSchema(this.schemaPath);
+    const mtime = statSync(this.schemaPath).mtimeMs;
+    if (!this._schema || mtime !== this._schemaMtime) {
+      this._schema = loadSchema(this.schemaPath);
+      this._schemaMtime = mtime;
+    }
     return this._schema;
   }
 

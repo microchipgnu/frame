@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "frame-wallets-eu": {
+      "command": "/Users/luisfreitas/.bun/bin/bun",
+      "args": [
+        "/Users/luisfreitas/Desktop/personal/frames-engineering/frames.ag/frame/src/cli/index.ts",
+        "serve",
+        "/Users/luisfreitas/Desktop/personal/frames-engineering/frames.ag/frame/examples/ai-agent-wallets-eu"
+      ],
+      "env": { "FRAME_AGENT": "claude:opus-4.7" }
+    }
+  }
+}
