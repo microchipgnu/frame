@@ -2,6 +2,7 @@
 // frame CLI entry point.
 
 import { init } from "./init.js";
+import { initMcp } from "./init-mcp.js";
 import { project } from "./project.js";
 import { query } from "./query.js";
 import { serve } from "./serve.js";
@@ -12,6 +13,7 @@ const [, , cmd, ...rest] = process.argv;
 
 const COMMANDS: Record<string, (args: string[]) => void | Promise<void>> = {
   init,
+  "init-mcp": initMcp,
   project,
   query,
   serve,
@@ -50,13 +52,17 @@ function usage() {
 
 usage:
   frame init <name>                       scaffold a new frame
-  frame serve <name>                      start the curation MCP server (stdio)
-  frame project <name>                    regenerate .frame/dataset.db
-  frame query <name> --all                dump every row
-  frame query <name> --entity <id>        one row by id
-  frame query <name> --field <f>=<v>      rows where field equals value
-  frame query <name> --sql "<select…>"    read-only SQL against the index
+  frame init-mcp [--name X] [--force]     write .mcp.json next to a frame
+  frame serve [<name>]                    start the curation MCP server (stdio)
+  frame project [<name>]                  regenerate .frame/dataset.db
+  frame query [<name>] --all              dump every row
+  frame query [<name>] --entity <id>      one row by id
+  frame query [<name>] --field <f>=<v>    rows where field equals value
+  frame query [<name>] --sql "<select…>"  read-only SQL against the index
   frame doctor [<name>]                   health check
+
+When the path argument is omitted, the current working directory is used.
+This makes a project-scoped .mcp.json zero-config — drop it next to schema.yml.
 
 documents:
   PROTOCOL.md   the file format spec
