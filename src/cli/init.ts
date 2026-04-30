@@ -15,9 +15,23 @@ import {
   readdirSync,
   writeFileSync,
 } from "node:fs";
-import { basename, isAbsolute, join, relative } from "node:path";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { FrameError, PROTOCOL_VERSION } from "../types.js";
 import { starterSchema } from "../schema.js";
+
+// Walk up from `dir` looking for an ancestor git repository. Returns the
+// repo root if found, else null. This lets `frame init` avoid creating
+// nested git repos when the user is scaffolding a frame inside an
+// existing repo (the multi-frame canonical layout).
+function findAncestorGit(dir: string): string | null {
+  let current = dir;
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
+}
 
 export function init(args: string[]): void {
   const arg = args[0];
@@ -105,8 +119,18 @@ How often the dataset should be re-checked, and what triggers refresh.
   // .gitignore — keep derived artifacts out of git
   writeFileSync(join(dir, ".gitignore"), `.frame/\n`);
 
-  // git init (only if not already a repo — running inside an existing repo is fine)
-  if (!existsSync(join(dir, ".git"))) {
+  // Git: only init a fresh repo when there's no ancestor repo. Inside an
+  // existing repo (the multi-frame layout), skip both init and commit —
+  // the parent repo tracks this frame as a subdirectory, and the user
+  // decides when to commit the new files.
+  const ancestorRepo = findAncestorGit(dir);
+  let gitMessage: string;
+  if (ancestorRepo) {
+    gitMessage =
+      ancestorRepo === dir
+        ? "  (existing git repo at this directory — files left unstaged)"
+        : `  (inside existing repo at ${ancestorRepo} — files left unstaged)`;
+  } else {
     try {
       execFileSync("git", ["init", "-q"], { cwd: dir, stdio: "pipe" });
       execFileSync("git", ["add", "-A"], { cwd: dir, stdio: "pipe" });
@@ -115,8 +139,9 @@ How often the dataset should be re-checked, and what triggers refresh.
         ["commit", "-q", "-m", `frame ${name} initialized`],
         { cwd: dir, stdio: "pipe" },
       );
+      gitMessage = "  git: initialized + initial commit";
     } catch (e) {
-      console.warn("(git init/commit skipped:", String(e), ")");
+      gitMessage = `  (git init/commit skipped: ${String(e)})`;
     }
   }
 
@@ -124,6 +149,7 @@ How often the dataset should be re-checked, and what triggers refresh.
   const inDir = process.cwd() === dir;
   const rel = inDir ? "." : relative(process.cwd(), dir);
   console.log(`◇ created ${dir}`);
+  console.log(gitMessage);
   console.log(`  edit ${rel === "." ? "" : rel + "/"}README.md and ${rel === "." ? "" : rel + "/"}schema.yml`);
   console.log(`  then: ${inDir ? "frame init-mcp" : `cd ${rel} && frame init-mcp`}`);
 }

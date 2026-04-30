@@ -1,6 +1,7 @@
 // CLI ergonomics: cwd default and init-mcp.
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveFrameDir } from "../src/cli/util.js";
@@ -93,6 +94,35 @@ describe("init", () => {
     writeFileSync(join(dir, "stray.txt"), "hello");
     process.chdir(realpathSync(TMP));
     expect(() => init(["init-nonempty"])).toThrow();
+  });
+
+  test("init does NOT create a nested git repo when run inside an existing repo", () => {
+    // Set up: a parent repo with a frame scaffolded into a subdir.
+    const parent = join(TMP, "init-multi-git");
+    rmSync(parent, { recursive: true, force: true });
+    mkdirSync(parent, { recursive: true });
+    execFileSync("git", ["init", "-q"], { cwd: parent, stdio: "pipe" });
+
+    process.chdir(realpathSync(parent));
+    init(["datasets/alpha"]);
+
+    // The frame must NOT have its own .git/ — the parent repo tracks it.
+    expect(existsSync(join(parent, "datasets/alpha/.git"))).toBe(false);
+    // But the frame's other files must exist.
+    expect(existsSync(join(parent, "datasets/alpha/schema.yml"))).toBe(true);
+    expect(existsSync(join(parent, "datasets/alpha/events.ndjson"))).toBe(true);
+
+    // And a second frame in the same parent repo also avoids nesting.
+    init(["datasets/beta"]);
+    expect(existsSync(join(parent, "datasets/beta/.git"))).toBe(false);
+  });
+
+  test("init DOES create a fresh repo when no ancestor git exists", () => {
+    const dir = join(TMP, "init-fresh-git");
+    rmSync(dir, { recursive: true, force: true });
+    process.chdir(realpathSync(TMP));
+    init([dir]);
+    expect(existsSync(join(dir, ".git"))).toBe(true);
   });
 });
 
