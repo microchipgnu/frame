@@ -1,6 +1,6 @@
 // Source validation. See PROTOCOL.md § Source schema.
 
-import { FrameError, type Source } from "./types.ts";
+import { FrameError, type Source } from "./types.js";
 
 export function validateSource(s: unknown): Source {
   if (typeof s !== "object" || s === null) {

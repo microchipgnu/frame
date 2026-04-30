@@ -7,7 +7,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { FrameError, type FrameEvent } from "./types.ts";
+import { FrameError, type FrameEvent } from "./types.js";
 
 export function readEvents(path: string): FrameEvent[] {
   if (!existsSync(path)) return [];

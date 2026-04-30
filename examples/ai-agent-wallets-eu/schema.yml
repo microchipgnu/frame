@@ -18,7 +18,7 @@ fields:
   hq_country:
     type: enum
     required: true
-    values: [DE, FR, UK, ES, IT, NL, SE, PL, PT, IE, AT, BE, DK, FI, NO, CH, GR, RO]
+    values: [DE, FR, UK, ES, IT, NL, SE, PL, PT, IE, AT, BE, DK, FI, NO, CH, GR, RO, EE, CY, LT, CZ, LU, SK, SI, HU, MT, BG, HR, LV, IS, LI]
   founded_year:
     type: int
     description: year the company was founded
@@ -38,4 +38,4 @@ tests:
   - name: hq_must_be_eu
     field: hq_country
     rule: enum
-    allowed: [DE, FR, UK, ES, IT, NL, SE, PL, PT, IE, AT, BE, DK, FI, NO, CH, GR, RO]
+    allowed: [DE, FR, UK, ES, IT, NL, SE, PL, PT, IE, AT, BE, DK, FI, NO, CH, GR, RO, EE, CY, LT, CZ, LU, SK, SI, HU, MT, BG, HR, LV, IS, LI]

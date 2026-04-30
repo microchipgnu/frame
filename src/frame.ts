@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Database } from "bun:sqlite";
+import { Database } from "./db.js";
 import {
   type AgentId,
   FrameError,
@@ -13,11 +13,11 @@ import {
   type ProjectionStats,
   type Row,
   type Source,
-} from "./types.ts";
-import { appendEvent, now, readEvents, uuid } from "./events.ts";
-import { loadSchema, validateValue } from "./schema.ts";
-import { validateSource } from "./source.ts";
-import { writeProjection } from "./projector.ts";
+} from "./types.js";
+import { appendEvent, now, readEvents, uuid } from "./events.js";
+import { loadSchema, validateValue } from "./schema.js";
+import { validateSource } from "./source.js";
+import { writeProjection } from "./projector.js";
 
 export type FrameOptions = {
   agent?: AgentId; // who is doing the writing (defaults to "system:cli")
@@ -293,30 +293,31 @@ export class Frame {
     if (!existsSync(this.dbPath)) this.project();
 
     const db = new Database(this.dbPath, { readonly: true });
+    type DbRow = { entity_id: string; fields_json: string; invalid_json: string | null };
     try {
       switch (input.mode) {
         case "entity": {
-          const stmt = db.prepare<{ entity_id: string; fields_json: string; invalid_json: string | null }, [string]>(
+          const stmt = db.prepare(
             "SELECT entity_id, fields_json, invalid_json FROM rows WHERE entity_id = ?",
           );
-          const r = stmt.get(input.entity_id);
+          const r = stmt.get<DbRow>(input.entity_id);
           if (!r) {
             throw new FrameError("EntityNotFound", `entity ${input.entity_id} not in current rows`);
           }
           return { rows: [rowFromDb(r)], total: 1 };
         }
         case "all": {
-          const stmt = db.prepare<{ entity_id: string; fields_json: string; invalid_json: string | null }, []>(
+          const stmt = db.prepare(
             "SELECT entity_id, fields_json, invalid_json FROM rows ORDER BY entity_id",
           );
-          const rs = stmt.all();
+          const rs = stmt.all<DbRow>();
           return { rows: rs.map(rowFromDb), total: rs.length };
         }
         case "field": {
-          const stmt = db.prepare<{ entity_id: string; fields_json: string; invalid_json: string | null }, []>(
+          const stmt = db.prepare(
             "SELECT entity_id, fields_json, invalid_json FROM rows ORDER BY entity_id",
           );
-          const rs = stmt.all().map(rowFromDb);
+          const rs = stmt.all<DbRow>().map(rowFromDb);
           const filtered = rs.filter((r) => {
             if (input.value === undefined) return r.fields[input.field] !== undefined;
             return r.fields[input.field] === input.value;

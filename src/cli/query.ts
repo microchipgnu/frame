@@ -1,7 +1,7 @@
 // `frame query <name> [--all|--entity <id>|--field <f>=<v>|--sql <sql>]`
 
-import { Frame } from "../frame.ts";
-import { resolveFrameDir } from "./util.ts";
+import { Frame } from "../frame.js";
+import { resolveFrameDir } from "./util.js";
 
 export function query(args: string[]): void {
   const dir = resolveFrameDir(args[0]);

@@ -9,7 +9,7 @@ import {
   type FieldType,
   type FrameSchema,
   PROTOCOL_VERSION,
-} from "./types.ts";
+} from "./types.js";
 
 const FIELD_TYPES: ReadonlySet<FieldType> = new Set([
   "string",

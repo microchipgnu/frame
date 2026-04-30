@@ -2,9 +2,9 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { Frame } from "../frame.ts";
-import { readEvents } from "../events.ts";
-import { resolveFrameDir } from "./util.ts";
+import { Frame } from "../frame.js";
+import { readEvents } from "../events.js";
+import { resolveFrameDir } from "./util.js";
 
 export function doctor(args: string[]): void {
   const dir = resolveFrameDir(args[0]);

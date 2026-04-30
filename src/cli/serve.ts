@@ -1,7 +1,7 @@
 // `frame serve <name>` — start the curation MCP server over stdio.
 
-import { startMcpServer } from "../mcp/server.ts";
-import { resolveFrameDir } from "./util.ts";
+import { startMcpServer } from "../mcp/server.js";
+import { resolveFrameDir } from "./util.js";
 
 export async function serve(args: string[]): Promise<void> {
   const dir = resolveFrameDir(args[0]);

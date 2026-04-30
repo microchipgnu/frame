@@ -1,12 +1,12 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 // frame CLI entry point.
 
-import { init } from "./init.ts";
-import { project } from "./project.ts";
-import { query } from "./query.ts";
-import { serve } from "./serve.ts";
-import { doctor } from "./doctor.ts";
-import { PROTOCOL_VERSION } from "../types.ts";
+import { init } from "./init.js";
+import { project } from "./project.js";
+import { query } from "./query.js";
+import { serve } from "./serve.js";
+import { doctor } from "./doctor.js";
+import { PROTOCOL_VERSION } from "../types.js";
 
 const [, , cmd, ...rest] = process.argv;
 

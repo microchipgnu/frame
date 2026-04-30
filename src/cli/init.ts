@@ -7,8 +7,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
-import { PROTOCOL_VERSION } from "../types.ts";
-import { starterSchema } from "../schema.ts";
+import { PROTOCOL_VERSION } from "../types.js";
+import { starterSchema } from "../schema.js";
 
 export function init(args: string[]): void {
   const arg = args[0];

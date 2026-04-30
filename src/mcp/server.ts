@@ -11,9 +11,9 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { Frame } from "../frame.ts";
-import { FrameError, PROTOCOL_VERSION } from "../types.ts";
-import { readEvents } from "../events.ts";
+import { Frame } from "../frame.js";
+import { FrameError, PROTOCOL_VERSION } from "../types.js";
+import { readEvents } from "../events.js";
 
 // Tool definitions. Mirrors MCP.md exactly.
 const TOOLS = [

@@ -2,7 +2,7 @@
 // Pure & deterministic: same events → same projection.
 // See PROTOCOL.md § Projection.
 
-import { Database } from "bun:sqlite";
+import { Database } from "./db.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
@@ -12,8 +12,8 @@ import {
   type ProjectionStats,
   type Row,
   type Source,
-} from "./types.ts";
-import { validateValue } from "./schema.ts";
+} from "./types.js";
+import { validateValue } from "./schema.js";
 
 type ProjectionState = {
   entities: Map<string, { created_at: string; removed_at?: string; removed_reason?: string }>;
@@ -174,7 +174,7 @@ export function writeProjection(
   // Default rollback-journal mode keeps the main .db file's mtime current,
   // which the doctor's freshness check relies on.
   const dbPath = join(dotFrame, "dataset.db");
-  const db = new Database(dbPath, { create: true });
+  const db = new Database(dbPath);
   try {
     db.exec("DROP TABLE IF EXISTS rows;");
     db.exec("DROP TABLE IF EXISTS facts;");
@@ -305,6 +305,5 @@ export function writeProjection(
   };
 }
 
-// Re-export for callers that want to do read-only queries.
-export { Database } from "bun:sqlite";
+// Re-export path helpers for caller convenience.
 export { dirname, join };
