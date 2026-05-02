@@ -3,10 +3,11 @@
 // See PROTOCOL.md § Projection.
 
 import { Database } from "./db.js";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   type FactSetPayload,
+  FrameError,
   type FrameEvent,
   type FrameSchema,
   type ProjectionStats,
@@ -40,10 +41,23 @@ function emptyState(): ProjectionState {
   };
 }
 
+// One event paired with the 1-based line number it originated from in
+// events.ndjson. Used so referential errors can point at the offending line.
+export type EventWithLine = { event: FrameEvent; line: number };
+
 // Replay events and produce the in-memory projection state.
-export function fold(events: FrameEvent[]): ProjectionState {
+//
+// Throws FrameError("OrphanEvent") on referential violations: fact.set against
+// a non-existent entity, or fact.deprecated / evidence.attached against a
+// non-existent fact. The SQL schema also enforces these via FOREIGN KEY, but
+// folding catches them earlier with a useful message (line + event id + ts).
+export function fold(events: FrameEvent[] | EventWithLine[]): ProjectionState {
+  const tracked: EventWithLine[] = isTracked(events)
+    ? events
+    : events.map((event, i) => ({ event, line: i + 1 }));
+
   const s = emptyState();
-  for (const e of events) {
+  for (const { event: e, line } of tracked) {
     switch (e.type) {
       case "entity.created": {
         const p = e.payload as { entity_id: string };
@@ -54,6 +68,11 @@ export function fold(events: FrameEvent[]): ProjectionState {
       }
       case "fact.set": {
         const p = e.payload as FactSetPayload;
+        if (!s.entities.has(p.entity_id)) {
+          throw orphan(e, line, "fact.set", "entity_id", p.entity_id, {
+            fact_id: p.fact_id,
+          });
+        }
         s.facts.set(p.fact_id, { ...p, ts: e.ts, agent: e.agent });
 
         const histKey = `${p.entity_id}::${p.field}`;
@@ -69,30 +88,34 @@ export function fold(events: FrameEvent[]): ProjectionState {
       }
       case "fact.deprecated": {
         const p = e.payload as { fact_id: string; reason: string };
+        if (!s.facts.has(p.fact_id)) {
+          throw orphan(e, line, "fact.deprecated", "fact_id", p.fact_id);
+        }
         s.deprecated.set(p.fact_id, { reason: p.reason, ts: e.ts });
 
         // If this was the current fact for its (entity, field), revert to the
         // most recent prior non-deprecated fact, if any.
-        const fact = s.facts.get(p.fact_id);
-        if (fact) {
-          const histKey = `${fact.entity_id}::${fact.field}`;
-          const hist = s.history.get(histKey) ?? [];
-          const prior = [...hist].reverse().find(
-            (fid) => fid !== p.fact_id && !s.deprecated.has(fid),
-          );
-          const currentForEntity = s.current.get(fact.entity_id);
-          if (currentForEntity) {
-            if (prior) {
-              currentForEntity.set(fact.field, prior);
-            } else {
-              currentForEntity.delete(fact.field);
-            }
+        const fact = s.facts.get(p.fact_id)!;
+        const histKey = `${fact.entity_id}::${fact.field}`;
+        const hist = s.history.get(histKey) ?? [];
+        const prior = [...hist].reverse().find(
+          (fid) => fid !== p.fact_id && !s.deprecated.has(fid),
+        );
+        const currentForEntity = s.current.get(fact.entity_id);
+        if (currentForEntity) {
+          if (prior) {
+            currentForEntity.set(fact.field, prior);
+          } else {
+            currentForEntity.delete(fact.field);
           }
         }
         break;
       }
       case "evidence.attached": {
         const p = e.payload as { fact_id: string; source: Source };
+        if (!s.facts.has(p.fact_id)) {
+          throw orphan(e, line, "evidence.attached", "fact_id", p.fact_id);
+        }
         const arr = s.extraEvidence.get(p.fact_id) ?? [];
         arr.push(p.source);
         s.extraEvidence.set(p.fact_id, arr);
@@ -115,6 +138,28 @@ export function fold(events: FrameEvent[]): ProjectionState {
     }
   }
   return s;
+}
+
+function isTracked(
+  events: FrameEvent[] | EventWithLine[],
+): events is EventWithLine[] {
+  return events.length === 0 || (events[0] as EventWithLine).event !== undefined;
+}
+
+function orphan(
+  e: FrameEvent,
+  line: number,
+  evType: string,
+  refField: string,
+  refValue: string,
+  extra: Record<string, unknown> = {},
+): FrameError {
+  return new FrameError(
+    "OrphanEvent",
+    `events.ndjson:${line} ${evType} references unknown ${refField}=${refValue} ` +
+      `(event id=${e.id}, ts=${e.ts})`,
+    { line, event_id: e.id, ts: e.ts, type: evType, [refField]: refValue, ...extra },
+  );
 }
 
 // Materialize current rows from a projection state.
@@ -150,9 +195,15 @@ export function rowsFromState(s: ProjectionState, schema: FrameSchema): Row[] {
 
 // Write the projection to .frame/dataset.db and .frame/rows.ndjson.
 // Returns stats. The DB is destroyed and rebuilt — projection is idempotent.
+//
+// Atomicity: both files are built into sibling `.tmp` paths and atomically
+// renamed over the live files at the end. If anything throws mid-build (FK
+// violation, schema mismatch, disk error), the previous projection is left
+// untouched — callers see the old `dataset.db` intact rather than a half-built
+// one. Stale `.tmp` files from a prior crashed run are removed on entry.
 export function writeProjection(
   frameDir: string,
-  events: FrameEvent[],
+  events: FrameEvent[] | EventWithLine[],
   schema: FrameSchema,
 ): ProjectionStats {
   const start = Date.now();
@@ -162,10 +213,21 @@ export function writeProjection(
   const state = fold(events);
   const rows = rowsFromState(state, schema);
 
-  // ── rows.ndjson ────────────────────────────────────────────────────────────
   const rowsPath = join(dotFrame, "rows.ndjson");
+  const rowsTmp = rowsPath + ".tmp";
+  const dbPath = join(dotFrame, "dataset.db");
+  const dbTmp = dbPath + ".tmp";
+
+  // Clean up any stale tmp files from a previously interrupted projection.
+  // Includes SQLite's rollback-journal sidecar, which would otherwise be
+  // mistaken for an in-progress transaction on next open.
+  for (const p of [rowsTmp, dbTmp, dbTmp + "-journal"]) {
+    if (existsSync(p)) rmSync(p, { force: true });
+  }
+
+  // ── rows.ndjson ────────────────────────────────────────────────────────────
   writeFileSync(
-    rowsPath,
+    rowsTmp,
     rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : ""),
   );
 
@@ -173,8 +235,7 @@ export function writeProjection(
   // We rebuild from scratch on every project — no WAL, no incremental updates.
   // Default rollback-journal mode keeps the main .db file's mtime current,
   // which the doctor's freshness check relies on.
-  const dbPath = join(dotFrame, "dataset.db");
-  const db = new Database(dbPath);
+  const db = new Database(dbTmp);
   try {
     db.exec("DROP VIEW  IF EXISTS all_sources;");
     db.exec("DROP TABLE IF EXISTS rows;");
@@ -312,9 +373,21 @@ export function writeProjection(
           FROM evidence e JOIN facts f ON f.fact_id = e.fact_id
           WHERE f.deprecated = 0;
     `);
-  } finally {
     db.close();
+  } catch (e) {
+    // Build failed — discard the half-built tmp DB so the live one stays
+    // authoritative and the next run starts clean.
+    try { db.close(); } catch {}
+    for (const p of [rowsTmp, dbTmp, dbTmp + "-journal"]) {
+      if (existsSync(p)) rmSync(p, { force: true });
+    }
+    throw e;
   }
+
+  // Atomic swap. POSIX rename(2) replaces the target in a single step on the
+  // same filesystem, so readers never observe a partially-written file.
+  renameSync(rowsTmp, rowsPath);
+  renameSync(dbTmp, dbPath);
 
   return {
     entity_count: rows.length,

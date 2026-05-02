@@ -2,7 +2,7 @@
 // Same events.ndjson must always produce the same projection.
 
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Frame } from "../src/frame.ts";
 import { PROTOCOL_VERSION } from "../src/types.ts";
@@ -304,5 +304,214 @@ describe("projector", () => {
     expect(r.total).toBe(1);
     expect(r.rows[0]?.invalid).toBeDefined();
     expect(r.rows[0]?.invalid?.[0]?.reason).toMatch(/required/);
+  });
+
+  // Regression: an externally-edited events.ndjson with a fact.set whose
+  // entity was never created used to crash in SQLite with an opaque
+  // SQLITE_CONSTRAINT_FOREIGNKEY. fold() now catches it first with a useful
+  // line + event id pointer so the failure is debuggable.
+  test("fold rejects fact.set referencing a missing entity, with line info", () => {
+    const dir = fresh("orphan-fact");
+    const frame = new Frame(dir);
+    frame.addEntity({ entity_id: "real" });
+    // Hand-craft a fact.set against an entity that doesn't exist.
+    const orphan = {
+      id: "00000000-0000-0000-0000-000000000001",
+      ts: "2026-05-02T06:44:00Z",
+      type: "fact.set",
+      agent: "test:cli",
+      payload: {
+        fact_id: "00000000-0000-0000-0000-000000000002",
+        entity_id: "ghost",
+        field: "name",
+        value: "Ghost",
+        source: { ...SOURCE },
+      },
+    };
+    appendFileSync(join(dir, "events.ndjson"), JSON.stringify(orphan) + "\n");
+    expect(() => frame.project()).toThrow(/references unknown entity_id=ghost/);
+    try {
+      frame.project();
+    } catch (e: any) {
+      expect(e.message).toContain("events.ndjson:2");
+      expect(e.message).toContain("ghost");
+      expect(e.message).toContain(orphan.id);
+      expect(e.code).toBe("OrphanEvent");
+    }
+  });
+
+  test("fold rejects fact.deprecated against unknown fact", () => {
+    const dir = fresh("orphan-dep");
+    const frame = new Frame(dir);
+    frame.addEntity({ entity_id: "acme" });
+    const orphan = {
+      id: "00000000-0000-0000-0000-000000000010",
+      ts: "2026-05-02T06:44:00Z",
+      type: "fact.deprecated",
+      agent: "test:cli",
+      payload: { fact_id: "no-such-fact", reason: "stale" },
+    };
+    appendFileSync(join(dir, "events.ndjson"), JSON.stringify(orphan) + "\n");
+    expect(() => frame.project()).toThrow(/references unknown fact_id=no-such-fact/);
+  });
+
+  test("fold rejects evidence.attached against unknown fact", () => {
+    const dir = fresh("orphan-ev");
+    const frame = new Frame(dir);
+    frame.addEntity({ entity_id: "acme" });
+    const orphan = {
+      id: "00000000-0000-0000-0000-000000000020",
+      ts: "2026-05-02T06:44:00Z",
+      type: "evidence.attached",
+      agent: "test:cli",
+      payload: { fact_id: "no-such-fact", source: { ...SOURCE } },
+    };
+    appendFileSync(join(dir, "events.ndjson"), JSON.stringify(orphan) + "\n");
+    expect(() => frame.project()).toThrow(/references unknown fact_id=no-such-fact/);
+  });
+
+  // Regression: when projection fails, the prior dataset.db must remain intact
+  // — workflows that gate "commit events.ndjson" on a successful project would
+  // otherwise lose work silently.
+  test("failed projection leaves prior dataset.db untouched", () => {
+    const dir = fresh("atomic-rebuild");
+    const frame = new Frame(dir);
+    frame.addEntityWithFacts({
+      entity_id: "acme",
+      source: SOURCE,
+      facts: [{ field: "name", value: "Acme" }],
+    });
+    const dbPath = join(dir, ".frame", "dataset.db");
+    const goodSize = statSync(dbPath).size;
+    const goodMtime = statSync(dbPath).mtimeMs;
+    expect(goodSize).toBeGreaterThan(0);
+
+    // Append an orphan event — next project() will throw mid-fold.
+    const orphan = {
+      id: "00000000-0000-0000-0000-0000000000aa",
+      ts: "2026-05-02T06:45:00Z",
+      type: "fact.set",
+      agent: "test:cli",
+      payload: {
+        fact_id: "00000000-0000-0000-0000-0000000000bb",
+        entity_id: "ghost",
+        field: "name",
+        value: "Ghost",
+        source: { ...SOURCE },
+      },
+    };
+    appendFileSync(join(dir, "events.ndjson"), JSON.stringify(orphan) + "\n");
+
+    expect(() => frame.project()).toThrow(/references unknown entity_id=ghost/);
+
+    // dataset.db must still be the old one; tmp must be cleaned up.
+    expect(existsSync(dbPath)).toBe(true);
+    expect(statSync(dbPath).size).toBe(goodSize);
+    expect(statSync(dbPath).mtimeMs).toBe(goodMtime);
+    expect(existsSync(dbPath + ".tmp")).toBe(false);
+    expect(existsSync(join(dir, ".frame", "rows.ndjson.tmp"))).toBe(false);
+
+    // And the old rows are still queryable.
+    const r = frame.query({ mode: "entity", entity_id: "acme" });
+    expect(r.rows[0]?.fields.name).toBe("Acme");
+  });
+
+  // Acquiring the lock with O_EXCL means a pre-existing lock file blocks a
+  // second writer with FrameError("Locked"), instead of the previous
+  // existsSync→writeFileSync TOCTOU window where two writers could both
+  // think they won.
+  test("acquireLock fails when another live process holds the lock", () => {
+    const dir = fresh("lock-busy");
+    // Plant a lock owned by a different live PID. PID 1 (launchd/init) is
+    // always alive on Unix; process.kill(1, 0) raises EPERM (not ESRCH), and
+    // the reclaim logic only treats ESRCH as "dead", so the lock stands.
+    writeFileSync(
+      join(dir, ".frame", "lock"),
+      `someone:else pid=1 ts=${new Date().toISOString()}\n`,
+    );
+    const frame = new Frame(dir);
+    expect(() => frame.addEntity({ entity_id: "acme" })).toThrow(/locked by someone:else/);
+  });
+
+  test("acquireLock reclaims a lock whose holder PID is dead", () => {
+    const dir = fresh("lock-deadpid");
+    // PIDs that high virtually never exist; process.kill(pid, 0) throws ESRCH.
+    writeFileSync(
+      join(dir, ".frame", "lock"),
+      `crashed:cli pid=99999999 ts=${new Date().toISOString()}\n`,
+    );
+    const frame = new Frame(dir);
+    // Should succeed by reclaiming the stale lock.
+    const r = frame.addEntity({ entity_id: "acme" });
+    expect(r.entity_id).toBe("acme");
+    // Lock released after the operation.
+    expect(existsSync(join(dir, ".frame", "lock"))).toBe(false);
+  });
+
+  test("acquireLock reclaims a lock older than the staleness window", () => {
+    const dir = fresh("lock-ancient");
+    // Live PID (PID 1) but ancient timestamp — staleness window kicks in.
+    const ancient = new Date(Date.now() - 60 * 60 * 1000).toISOString(); // 1h ago
+    writeFileSync(
+      join(dir, ".frame", "lock"),
+      `forgotten:cli pid=1 ts=${ancient}\n`,
+    );
+    const frame = new Frame(dir);
+    const r = frame.addEntity({ entity_id: "acme" });
+    expect(r.entity_id).toBe("acme");
+  });
+
+  test("acquireLock reclaims a self-owned lock from a previous run", () => {
+    const dir = fresh("lock-self");
+    writeFileSync(
+      join(dir, ".frame", "lock"),
+      `prev:run pid=${process.pid} ts=${new Date().toISOString()}\n`,
+    );
+    const frame = new Frame(dir);
+    expect(() => frame.addEntity({ entity_id: "acme" })).not.toThrow();
+  });
+
+  // Regression: addEntityWithFacts must be all-or-nothing. If fact validation
+  // fails the entity must NOT have been appended (used to leak through
+  // because addEntity ran under its own lock first).
+  test("addEntityWithFacts: failed fact validation rolls back the whole call", () => {
+    const dir = fresh("bundled-rollback");
+    const frame = new Frame(dir);
+    expect(() =>
+      frame.addEntityWithFacts({
+        entity_id: "acme",
+        source: SOURCE,
+        facts: [
+          { field: "name", value: "Acme" },
+          { field: "founded_year", value: "not-a-number" }, // bad
+        ],
+      }),
+    ).toThrow(/expects int/);
+    // Neither the entity nor any facts should appear in events.ndjson.
+    const events = readFileSync(join(dir, "events.ndjson"), "utf8");
+    expect(events).toBe("");
+    expect(frame.query({ mode: "all" }).total).toBe(0);
+  });
+
+  test("project cleans up stale .tmp files left from a prior crash", () => {
+    const dir = fresh("stale-tmp");
+    const frame = new Frame(dir);
+    // Drop bogus tmp files into .frame/ as if a previous run had crashed.
+    const dbTmp = join(dir, ".frame", "dataset.db.tmp");
+    const rowsTmp = join(dir, ".frame", "rows.ndjson.tmp");
+    writeFileSync(dbTmp, "garbage");
+    writeFileSync(rowsTmp, "garbage");
+
+    frame.addEntityWithFacts({
+      entity_id: "acme",
+      source: SOURCE,
+      facts: [{ field: "name", value: "Acme" }],
+    });
+
+    // After a successful project the tmp files should be gone (renamed away).
+    expect(existsSync(dbTmp)).toBe(false);
+    expect(existsSync(rowsTmp)).toBe(false);
+    // And the live files should be valid (not the "garbage" we planted).
+    expect(readFileSync(join(dir, ".frame", "rows.ndjson"), "utf8")).toContain("acme");
   });
 });

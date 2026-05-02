@@ -8,6 +8,7 @@ import { query } from "./query.js";
 import { render } from "./render.js";
 import { serve } from "./serve.js";
 import { doctor } from "./doctor.js";
+import { verify } from "./verify.js";
 import { PROTOCOL_VERSION } from "../types.js";
 
 const [, , cmd, ...rest] = process.argv;
@@ -20,6 +21,7 @@ const COMMANDS: Record<string, (args: string[]) => void | Promise<void>> = {
   render,
   serve,
   doctor,
+  verify,
 };
 
 async function main() {
@@ -58,6 +60,7 @@ usage:
   frame render [<path>]                   write static index.html (single or multi-frame)
   frame serve [<path>]                    start the curation MCP server (stdio)
   frame project [<path>]                  regenerate .frame/dataset.db
+  frame verify [<path>]                   re-fold events.ndjson; exit nonzero on issues
   frame query [<path>] --all              dump every row
   frame query [<path>] --entity <id>      one row by id
   frame query [<path>] --field <f>=<v>    rows where field equals value

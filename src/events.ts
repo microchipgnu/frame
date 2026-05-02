@@ -10,10 +10,19 @@ import {
 import { FrameError, type FrameEvent } from "./types.js";
 
 export function readEvents(path: string): FrameEvent[] {
+  return readEventsWithLines(path).map((t) => t.event);
+}
+
+// Same as readEvents but also returns the 1-based line number each event came
+// from. Used by the projector so referential errors can point at the offending
+// line in events.ndjson.
+export function readEventsWithLines(
+  path: string,
+): Array<{ event: FrameEvent; line: number }> {
   if (!existsSync(path)) return [];
   const raw = readFileSync(path, "utf8");
   if (!raw) return [];
-  const out: FrameEvent[] = [];
+  const out: Array<{ event: FrameEvent; line: number }> = [];
   const lines = raw.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!.trim();
@@ -27,7 +36,7 @@ export function readEvents(path: string): FrameEvent[] {
         `events.ndjson:${i + 1} is not valid JSON: ${e}`,
       );
     }
-    out.push(validateEnvelope(parsed, i + 1));
+    out.push({ event: validateEnvelope(parsed, i + 1), line: i + 1 });
   }
   return out;
 }

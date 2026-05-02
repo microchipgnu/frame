@@ -2,7 +2,7 @@
 // The MCP server (src/mcp/server.ts) wraps this 1:1; the CLI uses it directly.
 // All mutations go through these methods.
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { Database } from "./db.js";
 import {
@@ -14,7 +14,7 @@ import {
   type Row,
   type Source,
 } from "./types.js";
-import { appendEvent, now, readEvents, uuid } from "./events.js";
+import { appendEvent, now, readEvents, readEventsWithLines, uuid } from "./events.js";
 import { loadSchema, validateValue } from "./schema.js";
 import { validateSource } from "./source.js";
 import { writeProjection } from "./projector.js";
@@ -22,6 +22,12 @@ import { writeProjection } from "./projector.js";
 export type FrameOptions = {
   agent?: AgentId; // who is doing the writing (defaults to "system:cli")
 };
+
+// Locks older than this are treated as stale and reclaimed. 10 minutes is well
+// beyond any normal frame mutation (single-digit seconds for the largest
+// projections we've seen) but short enough that a forgotten lock from a
+// crashed CI runner doesn't wedge the next scheduled tick indefinitely.
+const LOCK_STALE_MS = 10 * 60 * 1000;
 
 export class Frame {
   readonly dir: string;
@@ -62,19 +68,85 @@ export class Frame {
 
   // ── locking ────────────────────────────────────────────────────────────────
 
+  // Acquire the per-frame writer lock. Single-host advisory only — guards
+  // against two CLI/MCP processes on the same machine racing on the same
+  // events.ndjson + projection. Not a substitute for distributed locking.
+  //
+  // Implementation:
+  //   - Atomic create with O_EXCL ('wx'), so two callers can't both think they
+  //     won (the existsSync→writeFileSync sequence had a TOCTOU window).
+  //   - On collision, treat the lock as stale and reclaim it if the holder
+  //     PID is dead, the holder is this same process (a previous run that
+  //     didn't release), or the lock is older than LOCK_STALE_MS. Otherwise
+  //     surface FrameError("Locked") with the holder string.
   private acquireLock(): () => void {
     mkdirSync(join(this.dir, ".frame"), { recursive: true });
-    if (existsSync(this.lockPath)) {
-      const holder = readFileSync(this.lockPath, "utf8").trim();
-      throw new FrameError(
-        "Locked",
-        `frame is locked by ${holder} — remove ${this.lockPath} if stale`,
-      );
+    const payload = `${this.agent} pid=${process.pid} ts=${now()}\n`;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const fd = openSync(this.lockPath, "wx");
+        try {
+          writeSync(fd, payload);
+        } finally {
+          closeSync(fd);
+        }
+        return () => {
+          if (existsSync(this.lockPath)) rmSync(this.lockPath);
+        };
+      } catch (e: unknown) {
+        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+        if (attempt === 0 && this.tryReclaimStaleLock()) continue;
+        const holder = (() => {
+          try { return readFileSync(this.lockPath, "utf8").trim(); }
+          catch { return "<unknown>"; }
+        })();
+        throw new FrameError(
+          "Locked",
+          `frame is locked by ${holder} — remove ${this.lockPath} if stale`,
+        );
+      }
     }
-    writeFileSync(this.lockPath, `${this.agent} pid=${process.pid} ts=${now()}\n`);
-    return () => {
-      if (existsSync(this.lockPath)) rmSync(this.lockPath);
-    };
+    // Unreachable: the loop either returns or throws on each iteration.
+    throw new FrameError("Locked", "could not acquire lock");
+  }
+
+  private tryReclaimStaleLock(): boolean {
+    let raw: string;
+    try {
+      raw = readFileSync(this.lockPath, "utf8");
+    } catch {
+      // File vanished between EEXIST and our read — treat as already cleared.
+      return true;
+    }
+    const pidMatch = raw.match(/pid=(\d+)/);
+    const tsMatch = raw.match(/ts=(\S+)/);
+
+    let stale = false;
+    if (pidMatch) {
+      const pid = Number(pidMatch[1]);
+      if (pid === process.pid) {
+        // Same process re-acquiring — previous run didn't release (e.g.
+        // killed mid-op). Reclaim rather than deadlock against ourselves.
+        stale = true;
+      } else {
+        try {
+          // Signal 0 probes existence without delivering anything.
+          process.kill(pid, 0);
+        } catch (err) {
+          // ESRCH = no such process (truly dead → reclaim).
+          // EPERM = exists but we lack permission (e.g. PID 1) → keep lock.
+          if ((err as NodeJS.ErrnoException).code === "ESRCH") stale = true;
+        }
+      }
+    }
+    if (!stale && tsMatch) {
+      const age = Date.now() - Date.parse(tsMatch[1]!);
+      if (Number.isFinite(age) && age > LOCK_STALE_MS) stale = true;
+    }
+    if (!stale) return false;
+    try { rmSync(this.lockPath, { force: true }); } catch { return false; }
+    return true;
   }
 
   // ── the six MCP operations ─────────────────────────────────────────────────
@@ -195,6 +267,10 @@ export class Frame {
   // 2b. add_entity_with_facts — combines entity creation with N facts in one call.
   // Highest-throughput primitive for the common pattern: "I just read a page; here is
   // an entity with these N fields." One round-trip instead of N+1.
+  //
+  // Single lock acquisition + single projection: a concurrent writer cannot
+  // observe an entity that exists with no facts attached (which used to be
+  // possible while addEntity released its lock before setFacts re-acquired).
   addEntityWithFacts(input: {
     entity_id?: string;
     source: Source;
@@ -205,13 +281,84 @@ export class Frame {
       observed_at?: string;
     }>;
   }): { entity_id: string; fact_ids: string[] } {
-    const { entity_id } = this.addEntity({ entity_id: input.entity_id });
-    const { fact_ids } = this.setFacts({
-      entity_id,
-      source: input.source,
-      facts: input.facts,
-    });
-    return { entity_id, fact_ids };
+    const release = this.acquireLock();
+    try {
+      const schema = this.schema();
+      const source = validateSource(input.source);
+
+      const entity_id = input.entity_id ?? `e-${uuid().slice(0, 8)}`;
+      if (!/^[a-z0-9][a-z0-9_-]*$/.test(entity_id)) {
+        throw new FrameError(
+          "InvalidEntityId",
+          `entity_id must match [a-z0-9][a-z0-9_-]*: ${JSON.stringify(entity_id)}`,
+        );
+      }
+
+      // Validate every fact BEFORE appending anything — atomicity. If one is
+      // invalid, neither the entity nor any fact lands.
+      for (const f of input.facts) {
+        const def = schema.fields[f.field];
+        if (!def && !schema.allow_unknown_fields) {
+          throw new FrameError(
+            "UnknownField",
+            `field ${f.field} is not in schema.yml`,
+          );
+        }
+        if (def) validateValue(f.field, def, f.value);
+        if (f.confidence !== undefined) {
+          if (
+            typeof f.confidence !== "number" ||
+            f.confidence < 0 ||
+            f.confidence > 1
+          ) {
+            throw new FrameError("InvalidConfidence", `confidence must be in [0, 1]`);
+          }
+        }
+      }
+
+      const events = this.events();
+      const exists = events.some(
+        (e) =>
+          e.type === "entity.created" &&
+          (e.payload as any).entity_id === entity_id,
+      );
+      if (exists) {
+        throw new FrameError("EntityExists", `entity ${entity_id} already exists`);
+      }
+
+      appendEvent(this.eventsPath, {
+        id: uuid(),
+        ts: now(),
+        type: "entity.created",
+        agent: this.agent,
+        payload: { entity_id },
+      } as FrameEvent);
+
+      const fact_ids: string[] = [];
+      for (const f of input.facts) {
+        const fact_id = uuid();
+        fact_ids.push(fact_id);
+        appendEvent(this.eventsPath, {
+          id: uuid(),
+          ts: now(),
+          type: "fact.set",
+          agent: this.agent,
+          payload: {
+            fact_id,
+            entity_id,
+            field: f.field,
+            value: f.value,
+            source,
+            ...(f.confidence !== undefined ? { confidence: f.confidence } : {}),
+            ...(f.observed_at ? { observed_at: f.observed_at } : {}),
+          },
+        } as FrameEvent);
+      }
+      this.project();
+      return { entity_id, fact_ids };
+    } finally {
+      release();
+    }
   }
 
   // 2. set_fact
@@ -482,7 +629,13 @@ export class Frame {
 
   // 6. project — regenerate derived state.
   project(): ProjectionStats {
-    return writeProjection(this.dir, this.events(), this.schema());
+    // Pass events with their source line numbers so the projector can locate
+    // referential errors back to events.ndjson.
+    return writeProjection(
+      this.dir,
+      readEventsWithLines(this.eventsPath),
+      this.schema(),
+    );
   }
 }
 
